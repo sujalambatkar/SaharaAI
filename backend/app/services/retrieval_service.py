@@ -126,21 +126,25 @@ async def retrieve(
 
     except Exception as e:
         # Fallback to dense-only if hybrid fails (e.g., sparse index not set up)
-        results = await client.query_points(
-            collection_name=settings.qdrant_collection,
-            query=dense_vector,
-            using="dense",
-            limit=top_k,
-        )
-        hits = []
-        for point in results.points:
-            payload = point.payload or {}
-            hits.append(
-                {
-                    "id": payload.get("id", str(point.id)),
-                    "question": payload.get("question", ""),
-                    "answer": payload.get("answer", ""),
-                    "score": float(point.score),
-                }
+        try:
+            results = await client.query_points(
+                collection_name=settings.qdrant_collection,
+                query=dense_vector,
+                using="dense",
+                limit=top_k,
             )
-        return hits, "dense_only"
+            hits = []
+            for point in results.points:
+                payload = point.payload or {}
+                hits.append(
+                    {
+                        "id": payload.get("id", str(point.id)),
+                        "question": payload.get("question", ""),
+                        "answer": payload.get("answer", ""),
+                        "score": float(point.score),
+                    }
+                )
+            return hits, "dense_only"
+        except Exception as e2:
+            print(f"Retrieval completely failed: {e2}")
+            return [], "unavailable"
