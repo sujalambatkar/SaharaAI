@@ -29,7 +29,11 @@ async def get_db():
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
-            raise
+            return
+        try:
+            await session.commit()
+        except Exception as e:
+            print(f"DB commit failed (non-fatal): {e}")
+            await session.rollback()
