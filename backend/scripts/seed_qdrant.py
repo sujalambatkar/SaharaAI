@@ -58,7 +58,7 @@ def compute_sparse_vector(text: str) -> SparseVector:
     return SparseVector(indices=indices, values=values)
 
 
-def wait_for_qdrant(client: QdrantClient, retries: int = 15, delay: int = 4) -> None:
+def wait_for_qdrant(client: QdrantClient, retries: int = 5, delay: int = 3) -> None:
     for attempt in range(retries):
         try:
             client.get_collections()
@@ -127,7 +127,7 @@ def seed(entries: list[dict], model: SentenceTransformer, client: QdrantClient) 
 def main() -> None:
     print("=== SaharaAI Qdrant Seed Script ===")
     try:
-        client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=5)
         wait_for_qdrant(client)
         ensure_collection(client)
 
