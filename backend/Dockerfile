@@ -25,4 +25,4 @@ COPY data/kb.jsonl /data/kb.jsonl
 EXPOSE 8000
 
 # Entrypoint: seed Qdrant then start the API
-CMD ["sh", "-c", "python scripts/seed_qdrant.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

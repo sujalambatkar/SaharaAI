@@ -1,3 +1,5 @@
+import asyncio
+import subprocess
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,9 +8,23 @@ from app.database import init_db
 from app.routes import chat, dashboard, metrics
 
 
+async def _seed_qdrant_background() -> None:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "python", "scripts/seed_qdrant.py",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await proc.communicate()
+        print(stdout.decode())
+    except Exception as e:
+        print(f"Background Qdrant seed failed: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    asyncio.create_task(_seed_qdrant_background())
     yield
 
 
