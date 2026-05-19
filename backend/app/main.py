@@ -62,4 +62,4 @@ async def health():
         qdrant_status = f"ok ({names})"
     except Exception as e:
         qdrant_status = f"error: {e}"
-    return {"status": "ok", "service": "SaharaAI", "qdrant": qdrant_status}
+    return {"status": "ok", "service": "SaharaAI", "qdrant": qdrant_status, "qdrant_url_prefix": settings.qdrant_url[:40]}
