@@ -23,7 +23,10 @@ async def _seed_qdrant_background() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
+    try:
+        await init_db()
+    except Exception as e:
+        print(f"WARNING: DB init failed ({e}) — continuing startup, retries will happen on first request")
     asyncio.create_task(_seed_qdrant_background())
     yield
 
