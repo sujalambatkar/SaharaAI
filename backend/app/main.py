@@ -53,4 +53,13 @@ app.include_router(metrics.router, tags=["observability"])
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "SaharaAI"}
+    from app.services.retrieval_service import get_qdrant_client
+    from app.config import settings
+    try:
+        client = get_qdrant_client()
+        cols = await client.get_collections()
+        names = [c.name for c in cols.collections]
+        qdrant_status = f"ok ({names})"
+    except Exception as e:
+        qdrant_status = f"error: {e}"
+    return {"status": "ok", "service": "SaharaAI", "qdrant": qdrant_status}
