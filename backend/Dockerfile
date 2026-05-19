@@ -18,6 +18,9 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 # Copy source code
 COPY . .
 
+# Bundle KB data so Railway (no volume mounts) can seed Qdrant at startup
+COPY data/kb.jsonl /data/kb.jsonl
+
 # Expose FastAPI port
 EXPOSE 8000
 

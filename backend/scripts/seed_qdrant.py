@@ -31,6 +31,7 @@ from qdrant_client.http.models import (
 )
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None
 COLLECTION = os.getenv("QDRANT_COLLECTION", "sahara_kb")
 KB_PATH = Path(os.getenv("KB_PATH", "/data/kb.jsonl"))
 DENSE_DIM = 384  # paraphrase-multilingual-MiniLM-L12-v2 output size
@@ -125,18 +126,21 @@ def seed(entries: list[dict], model: SentenceTransformer, client: QdrantClient) 
 
 def main() -> None:
     print("=== SaharaAI Qdrant Seed Script ===")
-    client = QdrantClient(url=QDRANT_URL)
-    wait_for_qdrant(client)
-    ensure_collection(client)
+    try:
+        client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        wait_for_qdrant(client)
+        ensure_collection(client)
 
-    if not KB_PATH.exists():
-        print(f"ERROR: KB file not found at {KB_PATH}")
-        sys.exit(1)
+        if not KB_PATH.exists():
+            print(f"WARNING: KB file not found at {KB_PATH} — skipping seed. API will start without KB data.")
+            return
 
-    entries = load_kb(KB_PATH)
-    model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-    seed(entries, model, client)
-    print("Seeding complete.")
+        entries = load_kb(KB_PATH)
+        model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+        seed(entries, model, client)
+        print("Seeding complete.")
+    except Exception as e:
+        print(f"WARNING: Seeding failed ({e}) — continuing to start API server anyway.")
 
 
 if __name__ == "__main__":
