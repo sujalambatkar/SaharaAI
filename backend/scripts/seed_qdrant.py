@@ -18,7 +18,7 @@ from collections import Counter
 # Allow running from /backend root
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import (
     Distance,
@@ -99,7 +99,7 @@ def load_kb(path: Path) -> list[dict]:
 def seed(entries: list[dict], model: SentenceTransformer, client: QdrantClient) -> None:
     texts = [e["question"] + " " + e["answer"] for e in entries]
     print("Embedding entries...")
-    dense_vectors = model.encode(texts, batch_size=16, show_progress_bar=True)
+    dense_vectors = list(model.embed(texts))
 
     points = []
     for entry, dense_vec in zip(entries, dense_vectors):
@@ -136,7 +136,7 @@ def main() -> None:
             return
 
         entries = load_kb(KB_PATH)
-        model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+        model = TextEmbedding("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
         seed(entries, model, client)
         print("Seeding complete.")
     except Exception as e:

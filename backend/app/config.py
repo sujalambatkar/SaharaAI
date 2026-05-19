@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     )
 
     groq_api_key: str = ""
-    qdrant_url: str = "http://qdrant:6333"
+    qdrant_url: str = "https://714c4961-d588-4990-a2a0-fc525035ee46.eu-west-1-0.aws.cloud.qdrant.io"
     qdrant_api_key: str = ""
     qdrant_collection: str = "sahara_kb"
     postgres_url: str = "postgresql+asyncpg://sahara:sahara@postgres:5432/saharadb"

@@ -15,9 +15,8 @@ alembic==1.14.0
 # Vector DB
 qdrant-client==1.12.1
 
-# Embeddings
-sentence-transformers==3.3.1
-torch==2.5.1
+# Embeddings (ONNX-based, ~200MB vs 1.8GB for torch)
+fastembed==0.4.2
 
 # LLM
 groq==0.13.1
@@ -25,17 +24,11 @@ groq==0.13.1
 # Language detection
 langdetect==1.0.9
 
-# LangChain + LangSmith
-langchain==0.3.12
-langchain-community==0.3.12
+# LangSmith
 langsmith==0.2.3
 
 # Observability
 prometheus-client==0.21.1
-
-# RAGAS eval
-ragas==0.2.6
-datasets==3.2.0
 
 # Testing
 pytest==8.3.4

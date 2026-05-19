@@ -8,17 +8,17 @@ from qdrant_client.http.models import (
     NamedSparseVector,
     SparseVector,
 )
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from app.config import settings
 
-_model: SentenceTransformer | None = None
+_model: TextEmbedding | None = None
 _client: AsyncQdrantClient | None = None
 
 
-def get_embedding_model() -> SentenceTransformer:
+def get_embedding_model() -> TextEmbedding:
     global _model
     if _model is None:
-        _model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+        _model = TextEmbedding("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     return _model
 
 
@@ -74,7 +74,7 @@ async def retrieve(
 
     loop = asyncio.get_event_loop()
     dense_vector = await loop.run_in_executor(
-        None, lambda: model.encode(query).tolist()
+        None, lambda: list(model.embed([query]))[0].tolist()
     )
 
     try:
