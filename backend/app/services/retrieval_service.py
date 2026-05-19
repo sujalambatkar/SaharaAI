@@ -25,9 +25,11 @@ def get_embedding_model() -> TextEmbedding:
 def get_qdrant_client() -> AsyncQdrantClient:
     global _client
     if _client is None:
+        import os
+        api_key = settings.qdrant_api_key or os.environ.get("QDRANT_API_KEY") or None
         _client = AsyncQdrantClient(
             url=settings.qdrant_url,
-            api_key=settings.qdrant_api_key or None,
+            api_key=api_key,
         )
     return _client
 

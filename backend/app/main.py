@@ -62,4 +62,6 @@ async def health():
         qdrant_status = f"ok ({names})"
     except Exception as e:
         qdrant_status = f"error: {e}"
-    return {"status": "ok", "service": "SaharaAI", "qdrant": qdrant_status, "qdrant_url_prefix": settings.qdrant_url[:40], "qdrant_key_set": bool(settings.qdrant_api_key)}
+    import os
+    env_key = os.environ.get("QDRANT_API_KEY", "")
+    return {"status": "ok", "service": "SaharaAI", "qdrant": qdrant_status, "qdrant_url_prefix": settings.qdrant_url[:40], "qdrant_key_pydantic": bool(settings.qdrant_api_key), "qdrant_key_env": bool(env_key), "qdrant_key_preview": env_key[:6] if env_key else "empty"}
