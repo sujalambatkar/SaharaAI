@@ -3,8 +3,12 @@ from sqlalchemy.pool import NullPool
 from app.config import settings
 from app.models import Base
 
+_db_url = settings.postgres_url
+if _db_url.startswith("postgresql://"):
+    _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
 engine = create_async_engine(
-    settings.postgres_url,
+    _db_url,
     poolclass=NullPool,
     echo=False,
 )
