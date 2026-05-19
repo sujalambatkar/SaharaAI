@@ -96,7 +96,7 @@ def load_kb(path: Path) -> list[dict]:
     return entries
 
 
-def seed(entries: list[dict], model: SentenceTransformer, client: QdrantClient) -> None:
+def seed(entries: list[dict], model, client: QdrantClient) -> None:
     texts = [e["question"] + " " + e["answer"] for e in entries]
     print("Embedding entries...")
     dense_vectors = list(model.embed(texts))
