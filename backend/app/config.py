@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     langsmith_project: str = "sahara-ai"
     retrieval_mode: str = "hybrid"
     confidence_threshold: float = 0.65
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,https://sahara-ai-xi.vercel.app"
 
     @property
     def cors_origins_list(self) -> List[str]:
