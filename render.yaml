@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: sahara-ai-backend
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    startCommand: sh start.sh
+    healthCheckPath: /health
+    plan: free
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: POSTGRES_URL
+        fromDatabase:
+          name: sahara-db
+          property: connectionString
+
+databases:
+  - name: sahara-db
+    databaseName: saharadb
+    user: sahara
+    plan: free
