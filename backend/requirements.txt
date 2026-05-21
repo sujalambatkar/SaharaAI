@@ -15,8 +15,6 @@ alembic==1.14.0
 # Vector DB
 qdrant-client==1.12.1
 
-# Embeddings (ONNX-based, ~200MB vs 1.8GB for torch)
-fastembed==0.4.2
 
 # LLM
 groq==0.13.1

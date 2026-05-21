@@ -1,25 +1,37 @@
 import asyncio
+import httpx
 from typing import List, Tuple
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import (
     ScoredPoint,
-    SearchRequest,
-    NamedVector,
-    NamedSparseVector,
     SparseVector,
 )
-from fastembed import TextEmbedding
 from app.config import settings
 
-_model: TextEmbedding | None = None
 _client: AsyncQdrantClient | None = None
 
+HF_EMBED_URL = (
+    "https://api-inference.huggingface.co/pipeline/feature-extraction/"
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
 
-def get_embedding_model() -> TextEmbedding:
-    global _model
-    if _model is None:
-        _model = TextEmbedding("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    return _model
+
+async def _get_dense_vector(text: str) -> list[float]:
+    """Embed text via HF Inference API — no local model, no extra RAM."""
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            HF_EMBED_URL,
+            json={"inputs": text, "options": {"wait_for_model": True}},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    # HF returns [float, ...] for sentence-transformers (already mean-pooled)
+    if data and isinstance(data[0], float):
+        return data
+    # Fallback: [seq_len, dim] — mean-pool manually
+    import numpy as np
+    return list(np.mean(data, axis=0))
 
 
 def get_qdrant_client() -> AsyncQdrantClient:
@@ -35,11 +47,6 @@ def get_qdrant_client() -> AsyncQdrantClient:
 
 
 def _compute_bm25_sparse(text: str) -> SparseVector:
-    """
-    Lightweight BM25-inspired sparse vector using term frequency.
-    Production use should replace this with a proper BM25 implementation or
-    Qdrant's built-in sparse vector support with a trained BM25 encoder.
-    """
     import re
     from collections import Counter
     import math
@@ -48,12 +55,9 @@ def _compute_bm25_sparse(text: str) -> SparseVector:
     tf = Counter(tokens)
     total = sum(tf.values())
 
-    indices = []
-    values = []
+    indices, values = [], []
     for token, count in tf.items():
-        # Simple hash-based index into a 30000-dim sparse space
         idx = hash(token) % 30000
-        # Normalized TF score
         score = count / total * math.log(1 + count)
         indices.append(abs(idx))
         values.append(float(score))
@@ -71,40 +75,26 @@ async def retrieve(
     Each result: {"id": str, "question": str, "answer": str, "score": float}
     """
     effective_mode = mode or settings.retrieval_mode
-    model = get_embedding_model()
     client = get_qdrant_client()
 
-    loop = asyncio.get_event_loop()
-    dense_vector = await loop.run_in_executor(
-        None, lambda: list(model.embed([query]))[0].tolist()
-    )
+    dense_vector = await _get_dense_vector(query)
 
     try:
         if effective_mode == "hybrid":
             sparse_vector = _compute_bm25_sparse(query)
 
-            # Qdrant hybrid search: prefetch dense + sparse, then RRF fusion
             from qdrant_client.http.models import Prefetch, FusionQuery, Fusion
 
             results: List[ScoredPoint] = await client.query_points(
                 collection_name=settings.qdrant_collection,
                 prefetch=[
-                    Prefetch(
-                        query=dense_vector,
-                        using="dense",
-                        limit=top_k * 2,
-                    ),
-                    Prefetch(
-                        query=sparse_vector,
-                        using="sparse",
-                        limit=top_k * 2,
-                    ),
+                    Prefetch(query=dense_vector, using="dense", limit=top_k * 2),
+                    Prefetch(query=sparse_vector, using="sparse", limit=top_k * 2),
                 ],
                 query=FusionQuery(fusion=Fusion.RRF),
                 limit=top_k,
             )
         else:
-            # Dense-only vector search
             results: List[ScoredPoint] = await client.query_points(
                 collection_name=settings.qdrant_collection,
                 query=dense_vector,
@@ -115,19 +105,16 @@ async def retrieve(
         hits = []
         for point in results.points:
             payload = point.payload or {}
-            hits.append(
-                {
-                    "id": payload.get("id", str(point.id)),
-                    "question": payload.get("question", ""),
-                    "answer": payload.get("answer", ""),
-                    "score": float(point.score),
-                }
-            )
+            hits.append({
+                "id": payload.get("id", str(point.id)),
+                "question": payload.get("question", ""),
+                "answer": payload.get("answer", ""),
+                "score": float(point.score),
+            })
 
         return hits, effective_mode
 
-    except Exception as e:
-        # Fallback to dense-only if hybrid fails (e.g., sparse index not set up)
+    except Exception:
         try:
             results = await client.query_points(
                 collection_name=settings.qdrant_collection,
@@ -138,14 +125,12 @@ async def retrieve(
             hits = []
             for point in results.points:
                 payload = point.payload or {}
-                hits.append(
-                    {
-                        "id": payload.get("id", str(point.id)),
-                        "question": payload.get("question", ""),
-                        "answer": payload.get("answer", ""),
-                        "score": float(point.score),
-                    }
-                )
+                hits.append({
+                    "id": payload.get("id", str(point.id)),
+                    "question": payload.get("question", ""),
+                    "answer": payload.get("answer", ""),
+                    "score": float(point.score),
+                })
             return hits, "dense_only"
         except Exception as e2:
             print(f"Retrieval completely failed: {e2}")
