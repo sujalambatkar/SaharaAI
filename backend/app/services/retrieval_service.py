@@ -1,79 +1,60 @@
-import asyncio
-import httpx
+import json
+import math
+import re
+from collections import Counter
+from pathlib import Path
 from typing import List, Tuple
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.http.models import (
-    ScoredPoint,
-    SparseVector,
-)
+
 from app.config import settings
 
-_client: AsyncQdrantClient | None = None
+_kb_entries: list[dict] | None = None
+_qdrant_client = None
 
-HF_EMBED_URL = (
-    "https://api-inference.huggingface.co/pipeline/feature-extraction/"
-    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-)
+KB_PATH = Path("/data/kb.jsonl")
 
 
-async def _get_dense_vector(text: str) -> list[float]:
-    """Embed text via HF Inference API — no local model, no extra RAM."""
-    import os
-    hf_token = os.environ.get("HF_TOKEN", "")
-    headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+def _load_kb() -> list[dict]:
+    global _kb_entries
+    if _kb_entries is None:
+        if KB_PATH.exists():
+            _kb_entries = []
+            with KB_PATH.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        _kb_entries.append(json.loads(line))
+        else:
+            _kb_entries = []
+    return _kb_entries
 
-    for attempt in range(3):
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                HF_EMBED_URL,
-                headers=headers,
-                json={"inputs": text, "options": {"wait_for_model": True}},
-            )
-        if resp.status_code == 503:
-            # Model still loading on HF side — wait and retry
-            await asyncio.sleep(10 * (attempt + 1))
+
+def _tokenize(text: str) -> list[str]:
+    return re.findall(r"\w+", text.lower())
+
+
+def _bm25_score(query_tokens: list[str], doc_tokens: list[str], avg_dl: float,
+                k1: float = 1.5, b: float = 0.75) -> float:
+    dl = len(doc_tokens)
+    tf = Counter(doc_tokens)
+    N = max(len(_load_kb()), 1)
+    score = 0.0
+    for token in set(query_tokens):
+        freq = tf.get(token, 0)
+        if freq == 0:
             continue
-        resp.raise_for_status()
-        data = resp.json()
-        # HF returns [float, ...] for sentence-transformers (already mean-pooled)
-        if data and isinstance(data[0], float):
-            return data
-        # Fallback: [seq_len, dim] — mean-pool manually
-        import numpy as np
-        return list(np.mean(data, axis=0))
-
-    raise RuntimeError("HF embedding API unavailable after retries")
+        idf = math.log((N - freq + 0.5) / (freq + 0.5) + 1)
+        score += idf * (freq * (k1 + 1)) / (freq + k1 * (1 - b + b * dl / avg_dl))
+    return score
 
 
-def get_qdrant_client() -> AsyncQdrantClient:
-    global _client
-    if _client is None:
+def get_qdrant_client():
+    global _qdrant_client
+    if _qdrant_client is None:
         import os
+        from qdrant_client import AsyncQdrantClient
         api_key = settings.qdrant_api_key or os.environ.get("QDRANT_API_KEY") or None
-        _client = AsyncQdrantClient(
-            url=settings.qdrant_url,
-            api_key=api_key,
-        )
-    return _client
-
-
-def _compute_bm25_sparse(text: str) -> SparseVector:
-    import re
-    from collections import Counter
-    import math
-
-    tokens = re.findall(r"\w+", text.lower())
-    tf = Counter(tokens)
-    total = sum(tf.values())
-
-    indices, values = [], []
-    for token, count in tf.items():
-        idx = hash(token) % 30000
-        score = count / total * math.log(1 + count)
-        indices.append(abs(idx))
-        values.append(float(score))
-
-    return SparseVector(indices=indices, values=values)
+        _qdrant_client = AsyncQdrantClient(url=settings.qdrant_url, api_key=api_key)
+    return _qdrant_client
 
 
 async def retrieve(
@@ -85,46 +66,34 @@ async def retrieve(
     Returns (results, mode_used).
     Each result: {"id": str, "question": str, "answer": str, "score": float}
     """
-    effective_mode = mode or settings.retrieval_mode
-    client = get_qdrant_client()
+    entries = _load_kb()
 
-    try:
-        dense_vector = await _get_dense_vector(query)
-
-        if effective_mode == "hybrid":
-            sparse_vector = _compute_bm25_sparse(query)
-
-            from qdrant_client.http.models import Prefetch, FusionQuery, Fusion
-
-            results: List[ScoredPoint] = await client.query_points(
-                collection_name=settings.qdrant_collection,
-                prefetch=[
-                    Prefetch(query=dense_vector, using="dense", limit=top_k * 2),
-                    Prefetch(query=sparse_vector, using="sparse", limit=top_k * 2),
-                ],
-                query=FusionQuery(fusion=Fusion.RRF),
-                limit=top_k,
-            )
-        else:
-            results: List[ScoredPoint] = await client.query_points(
-                collection_name=settings.qdrant_collection,
-                query=dense_vector,
-                using="dense",
-                limit=top_k,
-            )
-
-        hits = []
-        for point in results.points:
-            payload = point.payload or {}
-            hits.append({
-                "id": payload.get("id", str(point.id)),
-                "question": payload.get("question", ""),
-                "answer": payload.get("answer", ""),
-                "score": float(point.score),
-            })
-
-        return hits, effective_mode
-
-    except Exception as e:
-        print(f"Retrieval failed ({type(e).__name__}: {e}) — returning empty")
+    if not entries:
         return [], "unavailable"
+
+    query_tokens = _tokenize(query)
+    if not query_tokens:
+        return [], "bm25"
+
+    doc_token_lists = [_tokenize(e["question"] + " " + e["answer"]) for e in entries]
+    avg_dl = sum(len(t) for t in doc_token_lists) / len(doc_token_lists)
+
+    scored = []
+    for entry, doc_tokens in zip(entries, doc_token_lists):
+        score = _bm25_score(query_tokens, doc_tokens, avg_dl)
+        scored.append((score, entry))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    hits = [
+        {
+            "id": e["id"],
+            "question": e["question"],
+            "answer": e["answer"],
+            "score": round(s, 4),
+        }
+        for s, e in scored[:top_k]
+        if s > 0
+    ]
+
+    return hits, "bm25"
