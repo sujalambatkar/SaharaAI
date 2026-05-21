@@ -27,7 +27,11 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
 
     mode_override = request.retrieval_mode or await _get_active_retrieval_mode(db)
 
-    response = await run_rag_pipeline(request.query, retrieval_mode=mode_override)
+    try:
+        response = await run_rag_pipeline(request.query, retrieval_mode=mode_override)
+    except Exception as e:
+        print(f"RAG pipeline error: {e}")
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable. Please try again.")
 
     try:
         log = QueryLog(

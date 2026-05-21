@@ -18,20 +18,31 @@ HF_EMBED_URL = (
 
 async def _get_dense_vector(text: str) -> list[float]:
     """Embed text via HF Inference API — no local model, no extra RAM."""
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            HF_EMBED_URL,
-            json={"inputs": text, "options": {"wait_for_model": True}},
-        )
+    import os
+    hf_token = os.environ.get("HF_TOKEN", "")
+    headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+
+    for attempt in range(3):
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                HF_EMBED_URL,
+                headers=headers,
+                json={"inputs": text, "options": {"wait_for_model": True}},
+            )
+        if resp.status_code == 503:
+            # Model still loading on HF side — wait and retry
+            await asyncio.sleep(10 * (attempt + 1))
+            continue
         resp.raise_for_status()
         data = resp.json()
+        # HF returns [float, ...] for sentence-transformers (already mean-pooled)
+        if data and isinstance(data[0], float):
+            return data
+        # Fallback: [seq_len, dim] — mean-pool manually
+        import numpy as np
+        return list(np.mean(data, axis=0))
 
-    # HF returns [float, ...] for sentence-transformers (already mean-pooled)
-    if data and isinstance(data[0], float):
-        return data
-    # Fallback: [seq_len, dim] — mean-pool manually
-    import numpy as np
-    return list(np.mean(data, axis=0))
+    raise RuntimeError("HF embedding API unavailable after retries")
 
 
 def get_qdrant_client() -> AsyncQdrantClient:
@@ -77,9 +88,9 @@ async def retrieve(
     effective_mode = mode or settings.retrieval_mode
     client = get_qdrant_client()
 
-    dense_vector = await _get_dense_vector(query)
-
     try:
+        dense_vector = await _get_dense_vector(query)
+
         if effective_mode == "hybrid":
             sparse_vector = _compute_bm25_sparse(query)
 
@@ -114,24 +125,6 @@ async def retrieve(
 
         return hits, effective_mode
 
-    except Exception:
-        try:
-            results = await client.query_points(
-                collection_name=settings.qdrant_collection,
-                query=dense_vector,
-                using="dense",
-                limit=top_k,
-            )
-            hits = []
-            for point in results.points:
-                payload = point.payload or {}
-                hits.append({
-                    "id": payload.get("id", str(point.id)),
-                    "question": payload.get("question", ""),
-                    "answer": payload.get("answer", ""),
-                    "score": float(point.score),
-                })
-            return hits, "dense_only"
-        except Exception as e2:
-            print(f"Retrieval completely failed: {e2}")
-            return [], "unavailable"
+    except Exception as e:
+        print(f"Retrieval failed ({type(e).__name__}: {e}) — returning empty")
+        return [], "unavailable"
