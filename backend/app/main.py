@@ -10,6 +10,15 @@ from app.routes import chat, dashboard, metrics
 
 async def _seed_qdrant_background() -> None:
     try:
+        from app.services.retrieval_service import get_qdrant_client
+        client = get_qdrant_client()
+        info = await client.get_collection(settings.qdrant_collection)
+        if info.points_count and info.points_count > 0:
+            print(f"Qdrant already has {info.points_count} points — skipping seed.")
+            return
+    except Exception:
+        pass
+    try:
         proc = await asyncio.create_subprocess_exec(
             "python", "scripts/seed_qdrant.py",
             stdout=asyncio.subprocess.PIPE,
